@@ -1,7 +1,9 @@
+import math
 import numpy as np
 import csv
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
 
 @dataclass
@@ -238,7 +240,101 @@ class League:
         
         print(f"Transition matrix saved to {filename}")
 
-def premierStandard():
+    def predict_matchup(self, team1_name: str, team2_name: str) -> Optional[float]:
+        """
+        Predict the probability of team1 beating team2 based on their rankings.
+        Returns None if either team doesn't exist in the league.
+        """
+        rankings = dict(self.calculate_rankings())
+        
+        if team1_name not in rankings or team2_name not in rankings:
+            return None
+            
+        team1_rank = rankings[team1_name]
+        team2_rank = rankings[team2_name]
+        
+        # Calculate probability using the ranking ratio formula
+        return team1_rank / (team1_rank + team2_rank)
+
+    def evaluate_predictions(self) -> Tuple[float, float, int]:
+        """
+        Evaluate prediction accuracy using leave-one-out cross-validation.
+        Returns (average_log_loss, simple_accuracy, number_of_predictions)
+        """
+        total_log_loss = 0.0
+        correct_predictions = 0
+        num_predictions = 0
+        seen_matchups = set()  # Track which matchups we've evaluated
+        
+        # Iterate through all teams and their opponents
+        for team1_name, team1 in self._teams.items():
+            for team2_name, h2h in team1._records.items():
+                # Skip if we've already seen this matchup or teams haven't played
+                matchup = tuple(sorted([team1_name, team2_name]))
+                if matchup in seen_matchups or h2h.total_games == 0:
+                    continue
+                seen_matchups.add(matchup)
+                
+                # Calculate actual win probability from head-to-head record
+                actual_prob = h2h.points / h2h.total_games
+                
+                # Create a copy of the league without this matchup
+                league_copy = self._create_league_copy_without_matchup(team1_name, team2_name)
+                
+                # Get prediction from the copied league
+                predicted_prob = league_copy.predict_matchup(team1_name, team2_name)
+                
+                # Handle edge cases where predicted_prob is 0 or 1
+                predicted_prob = max(min(predicted_prob, 0.9999), 0.0001)
+                
+                # Calculate log loss
+                log_loss = -(actual_prob * math.log(predicted_prob) + 
+                           (1 - actual_prob) * math.log(1 - predicted_prob))
+                
+                # Calculate simple accuracy
+                if (predicted_prob > 0.5 and actual_prob > 0.5) or \
+                   (predicted_prob < 0.5 and actual_prob < 0.5):
+                    correct_predictions += 1
+                
+                total_log_loss += log_loss
+                num_predictions += 1
+        
+        avg_log_loss = total_log_loss / num_predictions if num_predictions > 0 else float('inf')
+        accuracy = correct_predictions / num_predictions if num_predictions > 0 else 0.0
+        
+        return avg_log_loss, accuracy, num_predictions
+
+    def _create_league_copy_without_matchup(self, team1_name: str, team2_name: str) -> 'League':
+        """
+        Create a copy of the league with the head-to-head record between team1 and team2 removed.
+        """
+        league_copy = League(self.name)
+        
+        # Copy all teams and their records
+        for team_name, team in self._teams.items():
+            new_team = league_copy.add_team(team_name)
+            for opp_name, h2h in team._records.items():
+                # Skip the matchup we want to exclude
+                if (team_name == team1_name and opp_name == team2_name) or \
+                   (team_name == team2_name and opp_name == team1_name):
+                    continue
+                # Copy the record
+                new_team._records[opp_name] = deepcopy(h2h)
+        
+        return league_copy
+
+    def print_prediction_accuracy(self) -> None:
+        """
+        Print the prediction accuracy metrics for the league.
+        """
+        avg_log_loss, accuracy, num_predictions = self.evaluate_predictions()
+        print(f"\n{self.name} Prediction Accuracy:")
+        print("-" * 40)
+        print(f"Number of predictions evaluated: {num_predictions}")
+        print(f"Average log loss: {avg_log_loss:.4f}")
+        print(f"Simple accuracy: {accuracy:.2%}")
+
+def premier22():
     # Create a league
     league = League("Premier League - 2022")
     
@@ -484,254 +580,8 @@ def premierStandard():
     # Print transition matrix
     league.save_transition_matrix("transition_matrix.csv")
 
-def premierTest():
-    # Create a league
-    league = League("Premier League - Example")
-    
-    if True:
-        # Add teams
-        Arsenal = league.add_team("Arsenal")
-        AstonVilla = league.add_team("Aston Villa")
-        Bournemouth = league.add_team("Bournemouth")
-        Brentford = league.add_team("Brentford")
-        BrightonAndHoveAlbion = league.add_team("Brighton & Hove Albion")
-        Chelsea = league.add_team("Chelsea")
-        CrystalPalace = league.add_team("Crystal Palace")
-        Everton = league.add_team("Everton")
-        Fulham = league.add_team("Fulham")
-        LeedsUnited = league.add_team("Leeds United")
-        LeicesterCity = league.add_team("Leicester City")
-        Liverpool = league.add_team("Liverpool")
-        ManchesterCity = league.add_team("Manchester City")
-        ManchesterUnited = league.add_team("Manchester United")
-        NewcastleUnited = league.add_team("Newcastle United")
-        NottinghamForest = league.add_team("Nottingham Forest")
-        Southampton = league.add_team("Southampton")
-        TottenhamHotspur = league.add_team("Tottenham Hotspur")
-        WestHamUnited = league.add_team("West Ham United")
-        WolverhamptonWanderers = league.add_team("Wolverhampton Wanderers")
-        
-        # Add head-to-head results
-
-        # all wins
-        # Arsenal.versus(AstonVilla, 2, 0, 0)
-        Arsenal.versus(Bournemouth, 2, 0, 0)
-        Arsenal.versus(Brentford, 2, 0, 0)
-        Arsenal.versus(BrightonAndHoveAlbion, 2, 0, 0)
-        Arsenal.versus(Chelsea, 2, 0, 0)
-        Arsenal.versus(CrystalPalace, 2, 0, 0)
-        Arsenal.versus(Everton, 2, 0, 0)
-        Arsenal.versus(Fulham, 2, 0, 0)
-        Arsenal.versus(LeedsUnited, 2, 0, 0)
-        Arsenal.versus(LeicesterCity, 2, 0, 0)
-        Arsenal.versus(Liverpool, 2, 0, 0)
-        Arsenal.versus(ManchesterCity, 2, 0, 0)
-        Arsenal.versus(ManchesterUnited, 2, 0, 0)
-        Arsenal.versus(NewcastleUnited, 2, 0, 0)
-        Arsenal.versus(NottinghamForest, 2, 0, 0)
-        Arsenal.versus(Southampton, 2, 0, 0)
-        Arsenal.versus(TottenhamHotspur, 2, 0, 0)
-        Arsenal.versus(WestHamUnited, 2, 0, 0)
-        Arsenal.versus(WolverhamptonWanderers, 2, 0, 0)
-
-        # all wins
-        AstonVilla.versus(Bournemouth, 2, 0, 0)
-        AstonVilla.versus(Brentford, 2, 0, 0)
-        AstonVilla.versus(BrightonAndHoveAlbion, 2, 0, 0)
-        AstonVilla.versus(Chelsea, 2, 0, 0)
-        AstonVilla.versus(CrystalPalace, 2, 0, 0)
-        AstonVilla.versus(Everton, 2, 0, 0)
-        AstonVilla.versus(Fulham, 2, 0, 0)
-        AstonVilla.versus(LeedsUnited, 2, 0, 0)
-        AstonVilla.versus(LeicesterCity, 2, 0, 0)
-        AstonVilla.versus(Liverpool, 2, 0, 0)
-        AstonVilla.versus(ManchesterCity, 2, 0, 0)
-        AstonVilla.versus(ManchesterUnited, 2, 0, 0)
-        AstonVilla.versus(NewcastleUnited, 2, 0, 0)
-        AstonVilla.versus(NottinghamForest, 2, 0, 0)
-        AstonVilla.versus(Southampton, 2, 0, 0)
-        AstonVilla.versus(TottenhamHotspur, 2, 0, 0)
-        AstonVilla.versus(WestHamUnited, 2, 0, 0)
-        AstonVilla.versus(WolverhamptonWanderers, 2, 0, 0)
-
-        Bournemouth.versus(Brentford, 0.5, 1.5, 0)
-        Bournemouth.versus(BrightonAndHoveAlbion, 0, 2, 0)
-        Bournemouth.versus(Chelsea, 0, 2, 0)
-        Bournemouth.versus(CrystalPalace, 0, 2, 0)
-        Bournemouth.versus(Everton, 1, 1, 0)
-        Bournemouth.versus(Fulham, 1.5, 0.5, 0)
-        Bournemouth.versus(LeedsUnited, 1, 1, 0)
-        Bournemouth.versus(LeicesterCity, 2, 0, 0)
-        Bournemouth.versus(Liverpool, 1, 1, 0)
-        Bournemouth.versus(ManchesterCity, 0, 2, 0)
-        Bournemouth.versus(ManchesterUnited, 0, 2, 0)
-        Bournemouth.versus(NewcastleUnited, 1, 1, 0)
-        Bournemouth.versus(NottinghamForest, 1.5, 0.5, 0)
-        Bournemouth.versus(Southampton, 1, 1, 0)
-        Bournemouth.versus(TottenhamHotspur, 1, 1, 0)
-        Bournemouth.versus(WestHamUnited, 0, 2, 0)
-        Bournemouth.versus(WolverhamptonWanderers, 1.5, 0.5, 0)
-
-        Brentford.versus(BrightonAndHoveAlbion, 1.5, 0.5, 0)
-        Brentford.versus(Chelsea, 1.5, 0.5, 0)
-        Brentford.versus(CrystalPalace, 1, 1, 0)
-        Brentford.versus(Everton, 0.5, 1.5, 0)
-        Brentford.versus(Fulham, 1, 1, 0)
-        Brentford.versus(LeedsUnited, 1.5, 0.5, 0)
-        Brentford.versus(LeicesterCity, 1, 1, 0)
-        Brentford.versus(Liverpool, 1, 1, 0)
-        Brentford.versus(ManchesterCity, 2, 0, 0)
-        Brentford.versus(ManchesterUnited, 1, 1, 0)
-        Brentford.versus(NewcastleUnited, 0, 2, 0)
-        Brentford.versus(NottinghamForest, 1.5, 0.5, 0)
-        Brentford.versus(Southampton, 2, 0, 0)
-        Brentford.versus(TottenhamHotspur, 1.5, 0.5, 0)
-        Brentford.versus(WestHamUnited, 2, 0, 0)
-        Brentford.versus(WolverhamptonWanderers, 0.5, 1.5, 0)
-            
-        BrightonAndHoveAlbion.versus(Chelsea, 2, 0, 0)
-        BrightonAndHoveAlbion.versus(CrystalPalace, 1.5, 0.5, 0)
-        BrightonAndHoveAlbion.versus(Everton, 1, 1, 0)
-        BrightonAndHoveAlbion.versus(Fulham, 0, 2, 0)
-        BrightonAndHoveAlbion.versus(LeedsUnited, 1.5, 0.5, 0)
-        BrightonAndHoveAlbion.versus(LeicesterCity, 1.5, 0.5, 0)
-        BrightonAndHoveAlbion.versus(Liverpool, 1.5, 0.5, 0)
-        BrightonAndHoveAlbion.versus(ManchesterCity, 0.5, 1.5, 0)
-        BrightonAndHoveAlbion.versus(ManchesterUnited, 2, 0, 0)
-        BrightonAndHoveAlbion.versus(NewcastleUnited, 0.5, 1.5, 0)
-        BrightonAndHoveAlbion.versus(NottinghamForest, 0.5, 1.5, 0)
-        BrightonAndHoveAlbion.versus(Southampton, 2, 0, 0)
-        BrightonAndHoveAlbion.versus(TottenhamHotspur, 0, 2, 0)
-        BrightonAndHoveAlbion.versus(WestHamUnited, 2, 0, 0)
-        BrightonAndHoveAlbion.versus(WolverhamptonWanderers, 2, 0, 0)
-
-        Chelsea.versus(CrystalPalace, 2, 0, 0)
-        Chelsea.versus(Everton, 1.5, 0.5, 0)
-        Chelsea.versus(Fulham, 0.5, 1.5, 0)
-        Chelsea.versus(LeedsUnited, 1, 1, 0)
-        Chelsea.versus(LeicesterCity, 2, 0, 0)
-        Chelsea.versus(Liverpool, 1, 1, 0)
-        Chelsea.versus(ManchesterCity, 0, 2, 0)
-        Chelsea.versus(ManchesterUnited, 0.5, 1.5, 0)
-        Chelsea.versus(NewcastleUnited, 0.5, 1.5, 0)
-        Chelsea.versus(NottinghamForest, 1, 1, 0)
-        Chelsea.versus(Southampton, 0, 2, 0)
-        Chelsea.versus(TottenhamHotspur, 0.5, 1.5, 0)
-        Chelsea.versus(WestHamUnited, 1.5, 0.5, 0)
-        Chelsea.versus(WolverhamptonWanderers, 1, 1, 0)
-
-        CrystalPalace.versus(Everton, 0.5, 1.5, 0)
-        CrystalPalace.versus(Fulham, 0.5, 1.5, 0)
-        CrystalPalace.versus(LeedsUnited, 2, 0, 0)
-        CrystalPalace.versus(LeicesterCity, 1.5, 0.5, 0)
-        CrystalPalace.versus(Liverpool, 1, 1, 0)
-        CrystalPalace.versus(ManchesterCity, 0, 2, 0)
-        CrystalPalace.versus(ManchesterUnited, 0.5, 1.5, 0)
-        CrystalPalace.versus(NewcastleUnited, 1, 1, 0)
-        CrystalPalace.versus(NottinghamForest, 0.5, 1.5, 0)
-        CrystalPalace.versus(Southampton, 2, 0, 0)
-        CrystalPalace.versus(TottenhamHotspur, 0, 2, 0)
-        CrystalPalace.versus(WestHamUnited, 2, 0, 0)
-        CrystalPalace.versus(WolverhamptonWanderers, 1, 1, 0)
-
-        Everton.versus(Fulham, 0.5, 1.5, 0)
-        Everton.versus(LeedsUnited, 1.5, 0.5, 0)
-        Everton.versus(LeicesterCity, 0.5, 1.5, 0)
-        Everton.versus(Liverpool, 0.5, 1.5, 0)
-        Everton.versus(ManchesterCity, 0.5, 1.5, 0)
-        Everton.versus(ManchesterUnited, 0, 2, 0)
-        Everton.versus(NewcastleUnited, 0, 2, 0)
-        Everton.versus(NottinghamForest, 1, 1, 0)
-        Everton.versus(Southampton, 1, 1, 0)
-        Everton.versus(TottenhamHotspur, 0.5, 1.5, 0)
-        Everton.versus(WestHamUnited, 1, 1, 0)
-        Everton.versus(WolverhamptonWanderers, 0.5, 1.5, 0)
-
-        Fulham.versus(LeedsUnited, 2, 0, 0)
-        Fulham.versus(LeicesterCity, 2, 0, 0)
-        Fulham.versus(Liverpool, 0.5, 1.5, 0)
-        Fulham.versus(ManchesterCity, 0, 2, 0)
-        Fulham.versus(ManchesterUnited, 0, 2, 0)
-        Fulham.versus(NewcastleUnited, 0, 2, 0)
-        Fulham.versus(NottinghamForest, 2, 0, 0)
-        Fulham.versus(Southampton, 2, 0, 0)
-        Fulham.versus(TottenhamHotspur, 0, 2, 0)
-        Fulham.versus(WestHamUnited, 0, 2, 0)
-        Fulham.versus(WolverhamptonWanderers, 1, 1, 0)
-
-        LeedsUnited.versus(LeicesterCity, 0.5, 1.5, 0)
-        LeedsUnited.versus(Liverpool, 1, 1, 0)
-        LeedsUnited.versus(ManchesterCity, 0, 2, 0)
-        LeedsUnited.versus(ManchesterUnited, 0.5, 1.5, 0)
-        LeedsUnited.versus(NewcastleUnited, 1, 1, 0)
-        LeedsUnited.versus(NottinghamForest, 1, 1, 0)
-        LeedsUnited.versus(Southampton, 1.5, 0.5, 0)
-        LeedsUnited.versus(TottenhamHotspur, 0, 2, 0)
-        LeedsUnited.versus(WestHamUnited, 0.5, 1.5, 0)
-        LeedsUnited.versus(WolverhamptonWanderers, 2, 0, 0)
-
-        LeicesterCity.versus(Liverpool, 0, 2, 0)
-        LeicesterCity.versus(ManchesterCity, 0, 2, 0)
-        LeicesterCity.versus(ManchesterUnited, 0, 2, 0)
-        LeicesterCity.versus(NewcastleUnited, 0.5, 1.5, 0)
-        LeicesterCity.versus(NottinghamForest, 1, 1, 0)
-        LeicesterCity.versus(Southampton, 0, 2, 0)
-        LeicesterCity.versus(TottenhamHotspur, 1, 1, 0)
-        LeicesterCity.versus(WestHamUnited, 2, 0, 0)
-        LeicesterCity.versus(WolverhamptonWanderers, 2, 0, 0)
-
-        Liverpool.versus(ManchesterCity, 1, 1, 0)
-        Liverpool.versus(ManchesterUnited, 1, 1, 0)
-        Liverpool.versus(NewcastleUnited, 2, 0, 0)
-        Liverpool.versus(NottinghamForest, 1, 1, 0)
-        Liverpool.versus(Southampton, 1.5, 0.5, 0)
-        Liverpool.versus(TottenhamHotspur, 2, 0, 0)
-        Liverpool.versus(WestHamUnited, 2, 0, 0)
-        Liverpool.versus(WolverhamptonWanderers, 1, 1, 0)
-
-        ManchesterCity.versus(ManchesterUnited, 1, 1, 0)
-        ManchesterCity.versus(NewcastleUnited, 1.5, 0.5, 0)
-        ManchesterCity.versus(NottinghamForest, 1.5, 0.5, 0)
-        ManchesterCity.versus(Southampton, 2, 0, 0)
-        ManchesterCity.versus(TottenhamHotspur, 1, 1, 0)
-        ManchesterCity.versus(WestHamUnited, 2, 0, 0)
-        ManchesterCity.versus(WolverhamptonWanderers, 2, 0, 0)
-
-        ManchesterUnited.versus(NewcastleUnited, 0.5, 1.5, 0)
-        ManchesterUnited.versus(NottinghamForest, 2, 0, 0)
-        ManchesterUnited.versus(Southampton, 1.5, 0.5, 0)
-        ManchesterUnited.versus(TottenhamHotspur, 1.5, 0.5, 0)
-        ManchesterUnited.versus(WestHamUnited, 1, 1, 0)
-        ManchesterUnited.versus(WolverhamptonWanderers, 2, 0, 0)
-
-        NewcastleUnited.versus(NottinghamForest, 2, 0, 0)
-        NewcastleUnited.versus(Southampton, 2, 0, 0)
-        NewcastleUnited.versus(TottenhamHotspur, 2, 0, 0)
-        NewcastleUnited.versus(WestHamUnited, 1.5, 0.5, 0)
-        NewcastleUnited.versus(WolverhamptonWanderers, 1.5, 0.5, 0)
-
-        NottinghamForest.versus(Southampton, 2, 0, 0)
-        NottinghamForest.versus(TottenhamHotspur, 0, 2, 0)
-        NottinghamForest.versus(WestHamUnited, 1, 1, 0)
-        NottinghamForest.versus(WolverhamptonWanderers, 0.5, 1.5, 0)
-
-        Southampton.versus(TottenhamHotspur, 0.5, 1.5, 0)
-        Southampton.versus(WestHamUnited, 0.5, 1.5, 0)
-        Southampton.versus(WolverhamptonWanderers, 0, 2, 0)
-
-        TottenhamHotspur.versus(WestHamUnited, 1.5, 0.5, 0)
-        TottenhamHotspur.versus(WolverhamptonWanderers, 1, 1, 0)
-
-        WestHamUnited.versus(WolverhamptonWanderers, 1, 1, 0)
-
-    # Print all records
-    league.print_all_records()
-    
-    # Calculate and print rankings
-    league.print_rankings()
-
-    # Print transition matrix
-    league.save_transition_matrix("transition_matrix.csv")
+    # Print prediction accuracy
+    league.print_prediction_accuracy()
 
 def exampleTest():
     # Create a league
@@ -742,15 +592,22 @@ def exampleTest():
     TeamB = league.add_team("Team B")
     TeamC = league.add_team("Team C")
     TeamD = league.add_team("Team D")
+    TeamE = league.add_team("Team E")
     
     # Add head-to-head results
     TeamA.versus(TeamB, 1, 0, 0)
     TeamA.versus(TeamC, 1, 0, 0)
+    TeamA.versus(TeamD, 1, 0, 0)
+    TeamA.versus(TeamE, 1, 0, 0)
 
     TeamB.versus(TeamC, 1, 0, 0)
     TeamB.versus(TeamD, 1, 0, 0)
+    TeamB.versus(TeamE, 1, 0, 0)
     
     TeamC.versus(TeamD, 1, 0, 0)
+    TeamC.versus(TeamE, 1, 0, 0)
+
+    TeamD.versus(TeamE, 1, 0, 0)
 
     # Print all records
     league.print_all_records()
@@ -761,8 +618,9 @@ def exampleTest():
     # Print transition matrix
     league.save_transition_matrix("transition_matrix.csv")
 
-    #print(league.calculate_rankings())
+    # Print prediction accuracy
+    league.print_prediction_accuracy()
 
 if __name__ == "__main__":
-    #premierStandard()
-    exampleTest()
+    premier22()
+    #exampleTest()
